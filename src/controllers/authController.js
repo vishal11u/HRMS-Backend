@@ -134,7 +134,10 @@ export const login = async (req, res, next) => {
     const result = await pool.query(
       "SELECT u.*, r.name as role_name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.email = $1 OR u.username = $2",
       [emailOrUsername, emailOrUsername]
-    );
+    ).catch(err => {
+      console.error('Database query error:', err);
+      throw new Error('Database connection error');
+    });
     
     const user = result.rows[0];
     
@@ -179,7 +182,13 @@ export const login = async (req, res, next) => {
       }
     });
   } catch (err) {
-    next(err);
+    console.error('Login error:', err);
+    res.status(500).json({
+      status: "error",
+      code: 500,
+      message: err.message || "Something went very wrong!",
+      details: process.env.NODE_ENV === 'development' ? err.stack : undefined
+    });
   }
 };
 
