@@ -3,8 +3,7 @@ import cors from "cors";
 import helmet from "helmet";
 import compression from "compression";
 import rateLimit from "express-rate-limit";
-import { config } from "./config/production.js";
-import createTables from "./config/initDB.js";
+ import createTables from "./config/initDB.js";
 import { errorHandler } from "./middlewares/errorHandler.js";
 
 import authRoutes from "./routes/auth.js";
@@ -52,9 +51,9 @@ app.get("/", (req, res) => {
 });
 
 // API Routes
-app.use("/api/auth", authRoutes);
-app.use("/api/users", userRoutes);
-app.use("/api/roles", roleRoutes);
+app.use("/auth", authRoutes);
+app.use("/users", userRoutes);
+app.use("/roles", roleRoutes);
 
 // Error handling middleware
 app.use(errorHandler);
