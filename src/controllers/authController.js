@@ -125,19 +125,26 @@ export const login = async (req, res, next) => {
   const { emailOrUsername, password } = req.body;
   
   try {
+    console.log('Login attempt for:', emailOrUsername);
+    
     // Validate input
     if (!emailOrUsername || !password) {
+      console.log('Missing credentials');
       throw new ValidationError("Email/Username and password are required");
     }
     
-    // Find user by email or username
+    // Find user by email or username with more details
     const result = await pool.query(
-      "SELECT u.*, r.name as role_name FROM users u JOIN roles r ON u.role_id = r.id WHERE u.email = $1 OR u.username = $2",
+      `SELECT 
+        u.*,
+        r.name as role_name,
+        r.id as role_id,
+        r.description as role_description
+      FROM users u 
+      JOIN roles r ON u.role_id = r.id 
+      WHERE u.email = $1 OR u.username = $2`,
       [emailOrUsername, emailOrUsername]
-    ).catch(err => {
-      console.error('Database query error:', err);
-      throw new Error('Database connection error');
-    });
+    );
     
     const user = result.rows[0];
     
@@ -161,12 +168,17 @@ export const login = async (req, res, next) => {
     
     // Generate token
     const token = jwt.sign(
-      { userId: user.id, roleId: user.role_id },
+      { 
+        userId: user.id, 
+        roleId: user.role_id,
+        username: user.username,
+        role: user.role_name
+      },
       process.env.JWT_SECRET,
       { expiresIn: "1d" }
     );
     
-    // Return success response
+    // Return success response with enhanced user data
     res.status(200).json({
       status: "success",
       code: 200,
@@ -177,12 +189,20 @@ export const login = async (req, res, next) => {
           id: user.id,
           username: user.username,
           email: user.email,
-          role: user.role_name
+          role: user.role_name,
+          roleId: user.role_id,
+          roleDescription: user.role_description,
+          createdAt: user.created_at,
+          lastLogin: new Date().toISOString()
         }
       }
     });
   } catch (err) {
-    console.error('Login error:', err);
+    console.error('Login error:', {
+      message: err.message,
+      stack: err.stack,
+      code: err.code
+    });
     res.status(500).json({
       status: "error",
       code: 500,
@@ -286,5 +306,106 @@ export const resetPassword = async (req, res) => {
   } catch (error) {
     console.error('❌ Error in resetPassword:', error);
     res.status(500).json({ message: 'Error resetting password' });
+  }
+};
+
+export const verifyToken = async (req, res) => {
+  try {
+    // Get token from Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader) {
+      return res.status(401).json({
+        status: "error",
+        code: 401,
+        message: "No token provided"
+      });
+    }
+
+    // Extract token from "Bearer <token>"
+    const token = authHeader.split(' ')[1];
+    if (!token) {
+      return res.status(401).json({
+        status: "error",
+        code: 401,
+        message: "Invalid token format"
+      });
+    }
+
+    try {
+      // Verify token
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      
+      // Get user details from database
+      const result = await pool.query(
+        `SELECT 
+          u.id,
+          u.username,
+          u.email,
+          r.name as role_name,
+          r.id as role_id,
+          r.description as role_description
+        FROM users u 
+        JOIN roles r ON u.role_id = r.id 
+        WHERE u.id = $1`,
+        [decoded.userId]
+      );
+      
+      const user = result.rows[0];
+      
+      if (!user) {
+        return res.status(404).json({
+          status: "error",
+          code: 404,
+          message: "User not found"
+        });
+      }
+      
+      // Token is valid, return user data
+      return res.status(200).json({
+        status: "success",
+        code: 200,
+        message: "Token is valid",
+        data: {
+          user: {
+            id: user.id,
+            username: user.username,
+            email: user.email,
+            role: user.role_name,
+            roleId: user.role_id,
+            roleDescription: user.role_description
+          },
+          tokenExpiry: decoded.exp * 1000 // Convert to milliseconds
+        }
+      });
+    } catch (jwtError) {
+      // Handle specific JWT errors
+      if (jwtError.name === 'TokenExpiredError') {
+        return res.status(401).json({
+          status: "error",
+          code: 401,
+          message: "Token has expired",
+          expired: true
+        });
+      }
+      
+      if (jwtError.name === 'JsonWebTokenError') {
+        return res.status(401).json({
+          status: "error",
+          code: 401,
+          message: "Invalid token",
+          invalid: true
+        });
+      }
+      
+      throw jwtError;
+    }
+  } catch (err) {
+    console.error('Token verification error:', err);
+    return res.status(500).json({
+      status: "error",
+      code: 500,
+      message: "Error verifying token",
+      details: process.env.NODE_ENV === 'development' ? err.message : undefined
+    });
   }
 };
